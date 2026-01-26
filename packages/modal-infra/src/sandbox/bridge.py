@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import subprocess
+import tempfile
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -136,7 +137,7 @@ class AgentBridge:
 
         # Session state
         self.opencode_session_id: str | None = None
-        self.session_id_file = Path("/tmp/opencode-session-id")
+        self.session_id_file = Path(tempfile.gettempdir()) / "opencode-session-id"
         self.repo_path = Path("/workspace")
 
         # HTTP client for OpenCode API
