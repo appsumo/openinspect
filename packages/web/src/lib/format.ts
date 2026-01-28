@@ -7,31 +7,9 @@
  * e.g., "claude-sonnet-4-5" → "Claude Sonnet 4.5"
  * e.g., "claude-haiku-4-5" → "Claude Haiku 4.5"
  * e.g., "claude-opus-4-5" → "Claude Opus 4.5"
- * e.g., "opencode/big-pickle" → "Big Pickle"
- * e.g., "opencode/glm-4.7-free" → "GLM 4.7"
- * e.g., "opencode/grok-code" → "Grok Code"
  */
 export function formatModelName(modelId: string): string {
   if (!modelId) return "Unknown Model";
-
-  // Handle OpenCode models (opencode/model-name)
-  if (modelId.startsWith("opencode/")) {
-    const modelName = modelId.slice("opencode/".length);
-    // Map known OpenCode models to display names
-    const openCodeModels: Record<string, string> = {
-      "big-pickle": "Big Pickle",
-      "glm-4.7-free": "GLM 4.7",
-      "grok-code": "Grok Code",
-    };
-    if (openCodeModels[modelName]) {
-      return openCodeModels[modelName];
-    }
-    // Fallback for unknown OpenCode models
-    return modelName
-      .split("-")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  }
 
   // Handle common Claude model patterns
   const match = modelId.match(/^claude-(\w+)-(\d+)-(\d+)$/i);
@@ -51,28 +29,9 @@ export function formatModelName(modelId: string): string {
 /**
  * Format model ID to lowercase display format for footer
  * e.g., "claude-sonnet-4-5" → "claude sonnet 4.5"
- * e.g., "opencode/big-pickle" → "big pickle"
- * e.g., "opencode/glm-4.7-free" → "glm 4.7"
- * e.g., "opencode/grok-code" → "grok code"
  */
 export function formatModelNameLower(modelId: string): string {
   if (!modelId) return "unknown model";
-
-  // Handle OpenCode models (opencode/model-name)
-  if (modelId.startsWith("opencode/")) {
-    const modelName = modelId.slice("opencode/".length);
-    // Map known OpenCode models to display names
-    const openCodeModels: Record<string, string> = {
-      "big-pickle": "big pickle",
-      "glm-4.7-free": "glm 4.7",
-      "grok-code": "grok code",
-    };
-    if (openCodeModels[modelName]) {
-      return openCodeModels[modelName];
-    }
-    // Fallback for unknown OpenCode models
-    return modelName.replace(/-/g, " ").toLowerCase();
-  }
 
   const match = modelId.match(/^claude-(\w+)-(\d+)-(\d+)$/i);
   if (match) {

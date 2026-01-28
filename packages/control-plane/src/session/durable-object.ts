@@ -52,14 +52,7 @@ function getGitHubAvatarUrl(githubLogin: string | null | undefined): string | un
 /**
  * Valid model names for the LLM.
  */
-const VALID_MODELS = [
-  "claude-haiku-4-5",
-  "claude-sonnet-4-5",
-  "claude-opus-4-5",
-  "opencode/big-pickle",
-  "opencode/glm-4.7-free",
-  "opencode/grok-code",
-] as const;
+const VALID_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"] as const;
 type ValidModel = (typeof VALID_MODELS)[number];
 
 /**
@@ -105,7 +98,7 @@ const WS_AUTH_TIMEOUT_MS = 30000; // 30 seconds
 
 /**
  * Extract provider and model from a model ID.
- * Models like "opencode/big-pickle" have embedded provider.
+ * Models with "/" have embedded provider (kept for backward compatibility with existing sessions).
  * Models like "claude-haiku-4-5" use "anthropic" as default provider.
  */
 function extractProviderAndModel(modelId: string): { provider: string; model: string } {

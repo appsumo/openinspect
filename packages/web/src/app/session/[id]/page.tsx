@@ -77,14 +77,6 @@ const MODEL_OPTIONS: { category: string; models: ModelOption[] }[] = [
       { id: "claude-sonnet-4-5", name: "claude sonnet 4.5", description: "Balanced performance" },
     ],
   },
-  {
-    category: "OpenCode (Free)",
-    models: [
-      { id: "opencode/big-pickle", name: "big pickle", description: "Free on OpenCode" },
-      { id: "opencode/glm-4.7-free", name: "glm 4.7", description: "Free on OpenCode" },
-      { id: "opencode/grok-code", name: "grok code", description: "Free on OpenCode" },
-    ],
-  },
 ];
 
 function CheckIcon() {
