@@ -345,6 +345,19 @@ function buildThreadSession(sessionId: string, repo: RepoConfig, model: string):
 }
 
 /**
+ * Format thread context for inclusion in a prompt.
+ * Returns a formatted string with previous messages from the thread.
+ */
+function formatThreadContext(previousMessages: string[]): string {
+  if (previousMessages.length === 0) {
+    return "";
+  }
+
+  const context = previousMessages.join("\n");
+  return `Context from the Slack thread:\n---\n${context}\n---\n\n`;
+}
+
+/**
  * Create a session and send the initial prompt.
  * Shared logic between handleAppMention and handleRepoSelection.
  *
@@ -356,7 +369,8 @@ async function startSessionAndSendPrompt(
   channel: string,
   threadTs: string,
   messageText: string,
-  userId: string
+  userId: string,
+  previousMessages?: string[]
 ): Promise<{ sessionId: string } | null> {
   // Fetch user's preferred model and validate it
   const userPrefs = await getUserPreferences(env, userId);
@@ -391,11 +405,15 @@ async function startSessionAndSendPrompt(
     model,
   };
 
+  // Build prompt content with thread context if available
+  const threadContext = previousMessages ? formatThreadContext(previousMessages) : "";
+  const promptContent = threadContext + messageText;
+
   // Send the prompt to the session
   const promptResult = await sendPrompt(
     env,
     session.sessionId,
-    messageText,
+    promptContent,
     `slack:${userId}`,
     callbackContext
   );
@@ -684,7 +702,7 @@ async function handleAppMention(
     const pendingKey = `pending:${channel}:${thread_ts || ts}`;
     await env.SLACK_KV.put(
       pendingKey,
-      JSON.stringify({ message: messageText, userId: event.user }),
+      JSON.stringify({ message: messageText, userId: event.user, previousMessages }),
       { expirationTtl: 3600 } // Expire after 1 hour
     );
 
@@ -769,7 +787,8 @@ async function handleAppMention(
     channel,
     threadKey,
     messageText,
-    event.user
+    event.user,
+    previousMessages
   );
 
   if (!sessionResult) {
@@ -833,7 +852,15 @@ async function handleRepoSelection(
     return;
   }
 
-  const { message: messageText, userId } = pendingData as { message: string; userId: string };
+  const {
+    message: messageText,
+    userId,
+    previousMessages,
+  } = pendingData as {
+    message: string;
+    userId: string;
+    previousMessages?: string[];
+  };
 
   // Find the repo config
   const repos = await getAvailableRepos(env);
@@ -863,7 +890,8 @@ async function handleRepoSelection(
     channel,
     threadKey,
     messageText,
-    userId
+    userId,
+    previousMessages
   );
 
   if (!sessionResult) {
