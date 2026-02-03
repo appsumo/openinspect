@@ -19,7 +19,7 @@ SANDBOX_DIR = Path(__file__).parent.parent / "sandbox"
 
 # Cache buster - change this to force Modal image rebuild
 # v41: Cache tool titles from ToolCallStart for use in ToolCallUpdate
-CACHE_BUSTER = "v41-cache-tool-titles"
+CACHE_BUSTER = "v44-acp-command-fixed"
 
 # Base image with all development tools
 base_image = (

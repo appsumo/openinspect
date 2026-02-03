@@ -554,21 +554,19 @@ class AgentBridge:
         # Create ACP client for handling callbacks
         client = ACPClient(self)
 
-        # ACP command is configurable - defaults to "claude-code-acp" but can be
-        # set to "opencode acp" or other ACP-compatible agents via ACP_COMMAND env var
+        # ACP command is configurable via ACP_COMMAND env var
         # Supports space-separated command + args (e.g., "opencode acp")
+        # Defaults to "claude-code-acp"
         acp_command_str = os.environ.get("ACP_COMMAND", "claude-code-acp")
         acp_parts = acp_command_str.split()
-        acp_command = acp_parts[0]
-        acp_args = acp_parts[1:]
-        self.log.info("acp.command", command=acp_command, args=acp_args)
+        self.log.info("acp.command", command=acp_parts)
 
         # Use spawn_agent_process from ACP SDK - it's an async context manager
         # We manually manage the context to keep the connection alive
         self._acp_context = spawn_agent_process(
             client,
-            acp_command,
-            *acp_args,
+            acp_parts[0],
+            *acp_parts[1:],
             env=env,
             cwd=workdir,
         )
