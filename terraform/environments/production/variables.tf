@@ -121,6 +121,12 @@ variable "claude_oauth_token" {
   default     = ""
 }
 
+variable "acp_command" {
+  description = "ACP command to spawn (e.g., 'claude-code-acp' or 'opencode acp'). Supports space-separated command + args. Allows switching between different ACP-compatible agents."
+  type        = string
+  default     = "claude-code-acp"
+}
+
 # =============================================================================
 # Security Secrets
 # =============================================================================
