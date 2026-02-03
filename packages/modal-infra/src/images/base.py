@@ -5,7 +5,7 @@ This image provides a complete development environment with:
 - Debian slim base with git, curl, build-essential
 - Node.js 22 LTS, pnpm, Bun runtime
 - Python 3.12 with uv
-- OpenCode CLI pre-installed
+- Claude Code ACP adapter for agent communication
 - Playwright with headless Chrome for visual verification
 - Sandbox entrypoint and bridge code
 """
@@ -17,14 +17,9 @@ import modal
 # Get the path to the sandbox code
 SANDBOX_DIR = Path(__file__).parent.parent / "sandbox"
 
-# Plugin is now bundled with sandbox code at /app/sandbox/inspect-plugin.js
-
-# OpenCode version to install
-OPENCODE_VERSION = "latest"
-
 # Cache buster - change this to force Modal image rebuild
-# v34: Replace print() with structured JSON logging in sandbox code
-CACHE_BUSTER = "v34-structured-logging"
+# v41: Cache tool titles from ToolCallStart for use in ToolCallUpdate
+CACHE_BUSTER = "v41-cache-tool-titles"
 
 # Base image with all development tools
 base_image = (
@@ -64,6 +59,13 @@ base_image = (
         "node --version",
         "npm --version",
     )
+    # Install GitHub CLI (gh)
+    .run_commands(
+        "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
+        'echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null',
+        "apt-get update && apt-get install -y gh",
+        "gh --version",
+    )
     # Install pnpm and Bun
     .run_commands(
         # Install pnpm globally
@@ -83,14 +85,13 @@ base_image = (
         "playwright",
         "pydantic>=2.0",  # Required for sandbox types
         "PyJWT[crypto]",  # For GitHub App token generation (includes cryptography)
+        "agent-client-protocol",  # Python ACP SDK for agent communication
     )
-    # Install OpenCode CLI and plugin for custom tools
+    # Install Claude Code ACP adapter for agent communication
+    # Uses Zed's wrapper which bridges Claude Agent SDK <-> ACP protocol
     .run_commands(
-        "npm install -g opencode-ai@latest",
-        "opencode --version || echo 'OpenCode installed'",
-        # Install @opencode-ai/plugin globally for custom tools
-        # This ensures tools can import the plugin without needing to run bun add
-        "npm install -g @opencode-ai/plugin@latest zod",
+        "npm install -g @zed-industries/claude-code-acp@latest",
+        "claude-code-acp --version || echo 'Claude Code ACP installed'",
     )
     # Install Playwright browsers (Chromium only to save space)
     .run_commands(
@@ -101,8 +102,7 @@ base_image = (
     .run_commands(
         "mkdir -p /workspace",
         "mkdir -p /app/plugins",
-        "mkdir -p /tmp/opencode",
-        "echo 'Image rebuilt at: v21-force-rebuild' > /app/image-version.txt",
+        f"echo 'Image rebuilt at: {CACHE_BUSTER}' > /app/image-version.txt",
     )
     # Set environment variables (including cache buster to force rebuild)
     .env(
@@ -114,11 +114,11 @@ base_image = (
             "PLAYWRIGHT_BROWSERS_PATH": "/root/.cache/ms-playwright",
             "PYTHONPATH": "/app",
             "SANDBOX_VERSION": CACHE_BUSTER,
-            # NODE_PATH for globally installed modules (used by custom tools)
-            "NODE_PATH": "/usr/lib/node_modules",
+            # Auto-approve all permissions in sandbox (running in isolated container)
+            "CLAUDE_CODE_SKIP_PERMISSIONS": "true",
         }
     )
-    # Add sandbox code to the image (includes plugin at /app/sandbox/inspect-plugin.js)
+    # Add sandbox code to the image
     .add_local_dir(
         str(SANDBOX_DIR),
         remote_path="/app/sandbox",

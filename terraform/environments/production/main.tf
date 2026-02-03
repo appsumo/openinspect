@@ -289,9 +289,12 @@ module "modal_app" {
   secrets = [
     {
       name = "llm-api-keys"
-      values = {
-        ANTHROPIC_API_KEY = var.anthropic_api_key
-      }
+      # OAuth token takes precedence (subscription billing, much cheaper)
+      # Only include non-empty values
+      values = merge(
+        var.anthropic_api_key != "" ? { ANTHROPIC_API_KEY = var.anthropic_api_key } : {},
+        var.claude_oauth_token != "" ? { CLAUDE_CODE_OAUTH_TOKEN = var.claude_oauth_token } : {}
+      )
     },
     {
       name = "github-app"
