@@ -79,8 +79,7 @@ export async function extractAgentResponse(
       cursor = data.hasMore ? data.cursor : undefined;
     } while (cursor);
 
-    // Get the final text from the last token event
-    // Token events contain cumulative text (not incremental deltas), so we only need the last one
+    // Token events contain incremental chunks - concatenate them all to get full text
     const tokenEvents = allEvents
       .filter((e): e is EventResponse & { type: "token" } => e.type === "token")
       .sort((a, b) => {
@@ -88,8 +87,7 @@ export async function extractAgentResponse(
         if (timeDiff !== 0) return timeDiff;
         return a.id.localeCompare(b.id); // Stable secondary sort
       });
-    const lastToken = tokenEvents[tokenEvents.length - 1];
-    const textContent = lastToken ? String(lastToken.data.content ?? "") : "";
+    const textContent = tokenEvents.map((e) => String(e.data.content ?? "")).join("");
 
     // Extract tool calls
     const toolCalls: ToolCallSummary[] = allEvents

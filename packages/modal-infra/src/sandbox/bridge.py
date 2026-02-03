@@ -563,12 +563,14 @@ class AgentBridge:
 
         # Use spawn_agent_process from ACP SDK - it's an async context manager
         # We manually manage the context to keep the connection alive
+        # Increase stdio buffer limit to 10MB (default 64KB is too small for large responses)
         self._acp_context = spawn_agent_process(
             client,
             acp_parts[0],
             *acp_parts[1:],
             env=env,
             cwd=workdir,
+            transport_kwargs={"limit": 10 * 1024 * 1024},
         )
 
         # Enter the context manually (it's wrapped in @asynccontextmanager)
