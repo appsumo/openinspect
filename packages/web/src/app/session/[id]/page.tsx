@@ -131,6 +131,7 @@ export default function SessionPage() {
     artifacts,
     currentParticipantId,
     isProcessing,
+    streamingContent,
     sendPrompt,
     stopExecution,
     sendTyping,
@@ -171,10 +172,10 @@ export default function SessionPage() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom when new content arrives
+  // Scroll to bottom when new content arrives (events or streaming)
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [events]);
+  }, [events, streamingContent]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -245,6 +246,7 @@ export default function SessionPage() {
         messagesEndRef={messagesEndRef}
         prompt={prompt}
         isProcessing={isProcessing}
+        streamingContent={streamingContent}
         selectedModel={selectedModel}
         modelDropdownOpen={modelDropdownOpen}
         modelDropdownRef={modelDropdownRef}
@@ -276,6 +278,7 @@ function SessionContent({
   messagesEndRef,
   prompt,
   isProcessing,
+  streamingContent,
   selectedModel,
   modelDropdownOpen,
   modelDropdownRef,
@@ -302,6 +305,7 @@ function SessionContent({
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   prompt: string;
   isProcessing: boolean;
+  streamingContent: ReturnType<typeof useSessionSocket>["streamingContent"];
   selectedModel: string;
   modelDropdownOpen: boolean;
   modelDropdownRef: React.RefObject<HTMLDivElement | null>;
@@ -409,7 +413,17 @@ function SessionContent({
                 />
               )
             )}
-            {isProcessing && <ThinkingIndicator />}
+            {/* Live streaming content display */}
+            {streamingContent && (
+              <div className="bg-card p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-muted-foreground">Assistant</span>
+                  <span className="inline-block w-2 h-2 bg-accent rounded-full animate-pulse" />
+                </div>
+                <SafeMarkdown content={streamingContent.content} className="text-sm" />
+              </div>
+            )}
+            {isProcessing && !streamingContent && <ThinkingIndicator />}
 
             <div ref={messagesEndRef} />
           </div>
