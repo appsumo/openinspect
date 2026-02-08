@@ -108,9 +108,23 @@ variable "slack_signing_secret" {
 # =============================================================================
 
 variable "anthropic_api_key" {
-  description = "Anthropic API key for Claude"
+  description = "Anthropic API key for Claude (used if claude_oauth_token not set)"
   type        = string
   sensitive   = true
+  default     = ""
+}
+
+variable "claude_oauth_token" {
+  description = "Claude OAuth token (from 'claude setup-token'). Takes precedence over API key - uses subscription billing instead of pay-per-token."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "acp_command" {
+  description = "ACP command to spawn (e.g., 'claude-code-acp' or 'opencode acp'). Supports space-separated command + args. Allows switching between different ACP-compatible agents."
+  type        = string
+  default     = "claude-code-acp"
 }
 
 # =============================================================================

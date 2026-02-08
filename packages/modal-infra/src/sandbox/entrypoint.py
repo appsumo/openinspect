@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Sandbox entrypoint - manages OpenCode server and bridge lifecycle.
+Sandbox entrypoint - manages bridge lifecycle and git sync.
 
 Runs as PID 1 inside the sandbox. Responsibilities:
 1. Perform git sync with latest code
-2. Start OpenCode server
-3. Start bridge process for control plane communication
-4. Monitor processes and restart on crash with exponential backoff
-5. Handle graceful shutdown on SIGTERM/SIGINT
+2. Start bridge process for control plane communication
+3. Monitor bridge process and restart on crash with exponential backoff
+4. Handle graceful shutdown on SIGTERM/SIGINT
+
+Note: The ACP agent (Claude Code) is spawned by the bridge on-demand,
+not by this entrypoint. This simplifies the startup sequence.
 """
 
 import asyncio
 import json
 import os
-import shutil
 import signal
 import time
 from pathlib import Path
@@ -31,24 +32,19 @@ class SandboxSupervisor:
 
     Manages:
     - Git synchronization with base branch
-    - OpenCode server process
     - Bridge process for control plane communication
     - Process monitoring with crash recovery
     """
 
     # Configuration
-    OPENCODE_PORT = 4096
-    HEALTH_CHECK_TIMEOUT = 30.0
     MAX_RESTARTS = 5
     BACKOFF_BASE = 2.0
     BACKOFF_MAX = 60.0
 
     def __init__(self):
-        self.opencode_process: asyncio.subprocess.Process | None = None
         self.bridge_process: asyncio.subprocess.Process | None = None
         self.shutdown_event = asyncio.Event()
         self.git_sync_complete = asyncio.Event()
-        self.opencode_ready = asyncio.Event()
 
         # Configuration from environment (set by Modal/SandboxManager)
         self.sandbox_id = os.environ.get("SANDBOX_ID", "unknown")
@@ -58,6 +54,10 @@ class SandboxSupervisor:
         self.repo_name = os.environ.get("REPO_NAME", "")
         self.github_app_token = os.environ.get("GITHUB_APP_TOKEN", "")
 
+        # Set GH_TOKEN for GitHub CLI (gh) - uses the same GitHub App token
+        if self.github_app_token:
+            os.environ["GH_TOKEN"] = self.github_app_token
+
         # Parse session config if provided
         session_config_json = os.environ.get("SESSION_CONFIG", "{}")
         self.session_config = json.loads(session_config_json)
@@ -65,7 +65,6 @@ class SandboxSupervisor:
         # Paths
         self.workspace_path = Path("/workspace")
         self.repo_path = self.workspace_path / self.repo_name
-        self.session_id_file = Path("/tmp/opencode-session-id")
 
         # Logger
         session_id = self.session_config.get("session_id", "")
@@ -218,115 +217,6 @@ class SandboxSupervisor:
             self.git_sync_complete.set()  # Allow agent to proceed anyway
             return False
 
-    async def start_opencode(self) -> None:
-        """Start OpenCode server with configuration."""
-        self.log.info("opencode.start")
-
-        # Build OpenCode config from session settings
-        # Model format is "provider/model", e.g. "anthropic/claude-sonnet-4-5"
-        provider = self.session_config.get("provider", "anthropic")
-        model = self.session_config.get("model", "claude-sonnet-4-5")
-        opencode_config = {
-            "model": f"{provider}/{model}",
-            "permission": {
-                "*": {
-                    "*": "allow",
-                },
-            },
-        }
-
-        # Determine working directory - use repo path if cloned, otherwise /workspace
-        workdir = self.workspace_path
-        if self.repo_path.exists() and (self.repo_path / ".git").exists():
-            workdir = self.repo_path
-
-        # Set up .opencode directory for custom tools
-        opencode_dir = workdir / ".opencode"
-        tool_dest = opencode_dir / "tool"
-        tool_source = Path("/app/sandbox/inspect-plugin.js")
-
-        if tool_source.exists():
-            # Create .opencode/tool directory
-            tool_dest.mkdir(parents=True, exist_ok=True)
-            shutil.copy(tool_source, tool_dest / "create-pull-request.js")
-
-            # Create node_modules symlink to global modules so OpenCode doesn't try to install
-            # and so imports resolve correctly via NODE_PATH
-            node_modules = opencode_dir / "node_modules"
-            global_modules = Path("/usr/lib/node_modules")
-            if not node_modules.exists() and global_modules.exists():
-                try:
-                    node_modules.symlink_to(global_modules)
-                except Exception as e:
-                    self.log.warn("opencode.symlink_error", exc=e)
-
-            # Create a minimal package.json so OpenCode sees this as a configured directory
-            package_json = opencode_dir / "package.json"
-            if not package_json.exists():
-                package_json.write_text('{"name": "opencode-tools", "type": "module"}')
-
-        env = {
-            **os.environ,
-            "OPENCODE_CONFIG_CONTENT": json.dumps(opencode_config),
-        }
-
-        # Start OpenCode server in the repo directory
-        self.opencode_process = await asyncio.create_subprocess_exec(
-            "opencode",
-            "serve",
-            "--port",
-            str(self.OPENCODE_PORT),
-            "--hostname",
-            "0.0.0.0",
-            "--print-logs",  # Print logs to stdout for debugging
-            cwd=workdir,  # Start in repo directory
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-
-        # Start log forwarder
-        asyncio.create_task(self._forward_opencode_logs())
-
-        # Wait for health check
-        await self._wait_for_health()
-        self.opencode_ready.set()
-        self.log.info("opencode.ready")
-
-    async def _forward_opencode_logs(self) -> None:
-        """Forward OpenCode stdout to supervisor stdout."""
-        if not self.opencode_process or not self.opencode_process.stdout:
-            return
-
-        try:
-            async for line in self.opencode_process.stdout:
-                print(f"[opencode] {line.decode().rstrip()}")
-        except Exception as e:
-            print(f"[supervisor] Log forwarding error: {e}")
-
-    async def _wait_for_health(self) -> None:
-        """Poll health endpoint until server is ready."""
-        health_url = f"http://localhost:{self.OPENCODE_PORT}/global/health"
-        start_time = time.time()
-
-        async with httpx.AsyncClient() as client:
-            while time.time() - start_time < self.HEALTH_CHECK_TIMEOUT:
-                if self.shutdown_event.is_set():
-                    raise RuntimeError("Shutdown requested during startup")
-
-                try:
-                    resp = await client.get(health_url, timeout=2.0)
-                    if resp.status_code == 200:
-                        return
-                except httpx.ConnectError:
-                    pass
-                except Exception as e:
-                    self.log.debug("opencode.health_check_error", exc=e)
-
-                await asyncio.sleep(0.5)
-
-        raise RuntimeError("OpenCode server failed to become healthy")
-
     async def start_bridge(self) -> None:
         """Start the agent bridge process."""
         self.log.info("bridge.start")
@@ -334,9 +224,6 @@ class SandboxSupervisor:
         if not self.control_plane_url:
             self.log.info("bridge.skip", reason="no_control_plane_url")
             return
-
-        # Wait for OpenCode to be ready
-        await self.opencode_ready.wait()
 
         # Get session_id from config (required for WebSocket connection)
         session_id = self.session_config.get("session_id", "")
@@ -357,8 +244,6 @@ class SandboxSupervisor:
             self.control_plane_url,
             "--token",
             self.sandbox_token,
-            "--opencode-port",
-            str(self.OPENCODE_PORT),
             env=os.environ,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -397,44 +282,9 @@ class SandboxSupervisor:
 
     async def monitor_processes(self) -> None:
         """Monitor child processes and restart on crash."""
-        restart_count = 0
         bridge_restart_count = 0
 
         while not self.shutdown_event.is_set():
-            # Check OpenCode process
-            if self.opencode_process and self.opencode_process.returncode is not None:
-                exit_code = self.opencode_process.returncode
-                restart_count += 1
-
-                self.log.error(
-                    "opencode.crash",
-                    exit_code=exit_code,
-                    restart_count=restart_count,
-                )
-
-                if restart_count > self.MAX_RESTARTS:
-                    self.log.error(
-                        "opencode.max_restarts",
-                        restart_count=restart_count,
-                    )
-                    await self._report_fatal_error(
-                        f"OpenCode crashed {restart_count} times, giving up"
-                    )
-                    self.shutdown_event.set()
-                    break
-
-                # Exponential backoff
-                delay = min(self.BACKOFF_BASE**restart_count, self.BACKOFF_MAX)
-                self.log.info(
-                    "opencode.restart",
-                    delay_s=round(delay, 1),
-                    restart_count=restart_count,
-                )
-
-                await asyncio.sleep(delay)
-                self.opencode_ready.clear()
-                await self.start_opencode()
-
             # Check bridge process
             if self.bridge_process and self.bridge_process.returncode is not None:
                 exit_code = self.bridge_process.returncode
@@ -634,7 +484,6 @@ class SandboxSupervisor:
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(self._handle_signal(s)))
 
         git_sync_success = False
-        opencode_ready = False
         try:
             # Phase 1: Git sync
             if restored_from_snapshot:
@@ -649,11 +498,7 @@ class SandboxSupervisor:
             # Phase 2: Configure git identity (if repo was cloned)
             await self.configure_git_identity()
 
-            # Phase 3: Start OpenCode server (in repo directory)
-            await self.start_opencode()
-            opencode_ready = True
-
-            # Phase 4: Start bridge (after OpenCode is ready)
+            # Phase 3: Start bridge (which will spawn ACP agent on-demand)
             await self.start_bridge()
 
             # Emit sandbox.startup wide event
@@ -664,12 +509,11 @@ class SandboxSupervisor:
                 repo_name=self.repo_name,
                 restored_from_snapshot=restored_from_snapshot,
                 git_sync_success=git_sync_success,
-                opencode_ready=opencode_ready,
                 duration_ms=duration_ms,
                 outcome="success",
             )
 
-            # Phase 5: Monitor processes
+            # Phase 4: Monitor processes
             await self.monitor_processes()
 
         except Exception as e:
@@ -688,21 +532,13 @@ class SandboxSupervisor:
         """Graceful shutdown of all processes."""
         self.log.info("supervisor.shutdown_start")
 
-        # Terminate bridge first
+        # Terminate bridge (which will clean up its ACP subprocess)
         if self.bridge_process and self.bridge_process.returncode is None:
             self.bridge_process.terminate()
             try:
-                await asyncio.wait_for(self.bridge_process.wait(), timeout=5.0)
+                await asyncio.wait_for(self.bridge_process.wait(), timeout=10.0)
             except TimeoutError:
                 self.bridge_process.kill()
-
-        # Terminate OpenCode
-        if self.opencode_process and self.opencode_process.returncode is None:
-            self.opencode_process.terminate()
-            try:
-                await asyncio.wait_for(self.opencode_process.wait(), timeout=10.0)
-            except TimeoutError:
-                self.opencode_process.kill()
 
         self.log.info("supervisor.shutdown_complete")
 

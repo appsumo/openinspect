@@ -62,6 +62,11 @@ interface Participant {
   lastSeen: number;
 }
 
+interface StreamingContent {
+  content: string;
+  messageId: string;
+}
+
 interface UseSessionSocketReturn {
   connected: boolean;
   connecting: boolean;
@@ -74,6 +79,7 @@ interface UseSessionSocketReturn {
   artifacts: Artifact[];
   currentParticipantId: string | null;
   isProcessing: boolean;
+  streamingContent: StreamingContent | null;
   sendPrompt: (content: string, model?: string) => void;
   stopExecution: () => void;
   sendTyping: () => void;
@@ -86,8 +92,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   const mountedRef = useRef(true);
   const subscribedRef = useRef(false);
   const wsTokenRef = useRef<string | null>(null);
-  // Accumulates text during streaming, displayed only on completion to avoid duplicate display.
-  // Stores only the latest token since token events contain the full accumulated text (not incremental).
+  // Accumulates text during streaming for final event and tracks streaming state.
+  // Token events now contain incremental chunks that we concatenate.
   const pendingTextRef = useRef<{ content: string; messageId: string; timestamp: number } | null>(
     null
   );
@@ -101,6 +107,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [currentParticipantId, setCurrentParticipantId] = useState<string | null>(null);
+  // Live streaming content display
+  const [streamingContent, setStreamingContent] = useState<StreamingContent | null>(null);
   const currentParticipantRef = useRef<{
     participantId: string;
     name: string;
@@ -133,6 +141,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
           setEvents([]);
           setArtifacts([]);
           pendingTextRef.current = null;
+          setStreamingContent(null);
           if (data.state) {
             setSessionState(data.state);
           }
@@ -155,12 +164,23 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
             const event = data.event;
 
             if (event.type === "token" && event.content && event.messageId) {
-              // Accumulate text but DON'T display yet
+              // Concatenate incremental chunks for streaming display
+              const isNewMessage = pendingTextRef.current?.messageId !== event.messageId;
+              const newContent = isNewMessage
+                ? event.content
+                : pendingTextRef.current!.content + event.content;
+
               pendingTextRef.current = {
-                content: event.content,
+                content: newContent,
                 messageId: event.messageId,
-                timestamp: event.timestamp,
+                timestamp: pendingTextRef.current?.timestamp ?? event.timestamp,
               };
+
+              // Update live streaming display
+              setStreamingContent({
+                content: newContent,
+                messageId: event.messageId,
+              });
             } else if (event.type === "execution_complete") {
               // On completion: Add final text to events using the token's original timestamp
               if (pendingTextRef.current) {
@@ -176,6 +196,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
                   },
                 ]);
               }
+              // Clear live streaming display
+              setStreamingContent(null);
               setEvents((prev) => [...prev, event]);
             } else {
               // Other events (tool_call, user_message, git_sync, etc.) - add normally
@@ -485,6 +507,8 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
         },
       ]);
     }
+    // Clear live streaming display
+    setStreamingContent(null);
     wsRef.current.send(JSON.stringify({ type: "stop" }));
   }, []);
 
@@ -551,6 +575,7 @@ export function useSessionSocket(sessionId: string): UseSessionSocketReturn {
     artifacts,
     currentParticipantId,
     isProcessing,
+    streamingContent,
     sendPrompt,
     stopExecution,
     sendTyping,
